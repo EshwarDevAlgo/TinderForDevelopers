@@ -1,0 +1,98 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # GitHub OIDC -> AWS IAM role
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Lambda production dependencies
+        working-directory: lambda/image-processor
+        run: npm ci --omit=dev
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: Terraform apply
+        id: tf
+        working-directory: infra/terraform
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=devmatch/prod.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+          terraform apply -auto-approve -input=false
+          {
+            echo "ecr=$(terraform output -raw ecr_repository_url)"
+            echo "asg=$(terraform output -raw asg_name)"
+            echo "bucket=$(terraform output -raw frontend_bucket)"
+            echo "distribution=$(terraform output -raw cloudfront_distribution_id)"
+            echo "url=$(terraform output -raw app_url)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push API image
+        working-directory: backend
+        run: |
+          docker build -t "${{ steps.tf.outputs.ecr }}:${GITHUB_SHA}" -t "${{ steps.tf.outputs.ecr }}:latest" .
+          docker push --all-tags "${{ steps.tf.outputs.ecr }}"
+
+      - name: Rolling restart of API instances
+        run: |
+          aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "${{ steps.tf.outputs.asg }}" \
+            --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":120}' \
+          || echo "::warning::Instance refresh already in progress; new instances will pull :latest"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Upload frontend to S3 & invalidate CloudFront
+        working-directory: frontend
+        run: |
+          aws s3 sync dist "s3://${{ steps.tf.outputs.bucket }}" --delete \
+            --cache-control "public,max-age=31536000,immutable" --exclude index.html
+          aws s3 cp dist/index.html "s3://${{ steps.tf.outputs.bucket }}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate"
+          aws cloudfront create-invalidation --distribution-id "${{ steps.tf.outputs.distribution }}" --paths "/index.html" "/"
+
+      - name: Summary
+        run: echo "### Deployed :rocket: ${{ steps.tf.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"

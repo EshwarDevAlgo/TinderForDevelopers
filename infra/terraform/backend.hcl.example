@@ -1,0 +1,6 @@
+# Copy to backend.hcl for local runs:  terraform init -backend-config=backend.hcl
+bucket       = "devmatch-tfstate-<ACCOUNT_ID>"
+key          = "devmatch/prod.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true

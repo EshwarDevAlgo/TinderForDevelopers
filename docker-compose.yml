@@ -1,0 +1,49 @@
+# Local development stack: Postgres + Redis + API + web (nginx).
+# Usage: docker compose up --build   ->  http://localhost:8080
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: devmatch
+      POSTGRES_PASSWORD: devmatch
+      POSTGRES_DB: devmatch
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devmatch"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # Mirrors ElastiCache config: LRU eviction when memory is full.
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgres://devmatch:devmatch@postgres:5432/devmatch
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: local-dev-secret-change-me
+      SEED_ON_START: "true"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    ports: ["4000:4000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  web:
+    build: ./frontend
+    ports: ["8080:80"]
+    depends_on: [api]
+
+volumes:
+  pgdata:

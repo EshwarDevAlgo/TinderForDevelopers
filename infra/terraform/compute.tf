@@ -73,6 +73,16 @@ resource "aws_iam_role_policy" "app" {
       },
       {
         Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${aws_s3_bucket.uploads.arn}/media/*", "${aws_s3_bucket.frontend.arn}/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.frontend.arn
+      },
+      {
+        Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "${aws_cloudwatch_log_group.api.arn}:*"
       },
@@ -130,10 +140,22 @@ resource "aws_lb_listener_rule" "from_cloudfront" {
   listener_arn = aws_lb_listener.http.arn
   priority     = 10
 
-  condition {
-    http_header {
-      http_header_name = "X-Origin-Verify"
-      values           = [random_password.origin_verify.result]
+  dynamic "condition" {
+    for_each = var.enable_cloudfront ? [1] : []
+    content {
+      http_header {
+        http_header_name = "X-Origin-Verify"
+        values           = [random_password.origin_verify.result]
+      }
+    }
+  }
+
+  dynamic "condition" {
+    for_each = var.enable_cloudfront ? [] : [1]
+    content {
+      path_pattern {
+        values = ["/*"]
+      }
     }
   }
 
@@ -169,18 +191,20 @@ resource "aws_launch_template" "api" {
   }
 
   user_data = base64encode(templatefile("${path.module}/templates/user_data.sh.tpl", {
-    region         = var.aws_region
-    ecr_repo_url   = aws_ecr_repository.api.repository_url
-    image_tag      = var.backend_image_tag
-    ssm_prefix     = local.ssm_prefix
-    db_host        = aws_db_instance.postgres.address
-    db_user        = aws_db_instance.postgres.username
-    db_name        = aws_db_instance.postgres.db_name
-    redis_host     = aws_elasticache_replication_group.redis.primary_endpoint_address
-    uploads_bucket = aws_s3_bucket.uploads.bucket
-    log_group      = aws_cloudwatch_log_group.api.name
-    openai_model   = var.openai_model
-    seed_on_start  = var.seed_on_start
+    region          = var.aws_region
+    ecr_repo_url    = aws_ecr_repository.api.repository_url
+    image_tag       = var.backend_image_tag
+    ssm_prefix      = local.ssm_prefix
+    db_host         = aws_db_instance.postgres.address
+    db_user         = aws_db_instance.postgres.username
+    db_name         = aws_db_instance.postgres.db_name
+    redis_host      = aws_elasticache_replication_group.redis.primary_endpoint_address
+    uploads_bucket  = aws_s3_bucket.uploads.bucket
+    frontend_bucket = aws_s3_bucket.frontend.bucket
+    serve_spa       = !var.enable_cloudfront
+    log_group       = aws_cloudwatch_log_group.api.name
+    openai_model    = var.openai_model
+    seed_on_start   = var.seed_on_start
   }))
 
   tag_specifications {
@@ -211,7 +235,9 @@ resource "aws_autoscaling_group" "api" {
   instance_refresh {
     strategy = "Rolling"
     preferences {
-      min_healthy_percentage = 50
+      # Launch-before-terminate so a single-instance ASG has no downtime.
+      min_healthy_percentage = 100
+      max_healthy_percentage = 200
       instance_warmup        = 120
     }
   }

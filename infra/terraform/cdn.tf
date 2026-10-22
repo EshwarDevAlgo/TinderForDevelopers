@@ -34,7 +34,12 @@ resource "aws_cloudfront_function" "spa_rewrite" {
   EOF
 }
 
+locals {
+  app_origin = var.enable_cloudfront ? "https://${aws_cloudfront_distribution.main[0].domain_name}" : "http://${aws_lb.api.dns_name}"
+}
+
 resource "aws_cloudfront_distribution" "main" {
+  count               = var.enable_cloudfront ? 1 : 0
   enabled             = true
   comment             = "DevMatch"
   default_root_object = "index.html"

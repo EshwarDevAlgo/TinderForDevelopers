@@ -18,25 +18,31 @@ variable "vpc_cidr" {
   default = "10.20.0.0/16"
 }
 
+variable "enable_cloudfront" {
+  description = "false = ALB is public over HTTP and the API container serves the SPA and /media (used until the AWS account is verified for CloudFront)"
+  type        = bool
+  default     = false
+}
+
 # --- Compute (EC2 Auto Scaling, multi-AZ) ---
 variable "instance_type" {
   type    = string
-  default = "t3.small"
+  default = "t3.micro"
 }
 
 variable "asg_min_size" {
   type    = number
-  default = 2
+  default = 1
 }
 
 variable "asg_max_size" {
   type    = number
-  default = 4
+  default = 2
 }
 
 variable "asg_desired_capacity" {
   type    = number
-  default = 2
+  default = 1
 }
 
 variable "backend_image_tag" {
@@ -59,6 +65,12 @@ variable "db_multi_az" {
 variable "db_deletion_protection" {
   type    = bool
   default = false
+}
+
+variable "db_backup_retention_days" {
+  description = "AWS free-plan accounts allow at most 1 day; use 7+ on a paid plan"
+  type        = number
+  default     = 1
 }
 
 variable "db_skip_final_snapshot" {

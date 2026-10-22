@@ -1,10 +1,10 @@
 output "app_url" {
   description = "Public URL of DevMatch"
-  value       = "https://${aws_cloudfront_distribution.main.domain_name}"
+  value       = local.app_origin
 }
 
 output "cloudfront_distribution_id" {
-  value = aws_cloudfront_distribution.main.id
+  value = var.enable_cloudfront ? aws_cloudfront_distribution.main[0].id : ""
 }
 
 output "frontend_bucket" {

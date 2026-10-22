@@ -33,5 +33,8 @@ export const config = {
     maxUploadBytes: Number(env.MAX_UPLOAD_BYTES || 5 * 1024 * 1024),
   },
   mediaBaseUrl: env.MEDIA_BASE_URL || '/media',
+  // Set when there is no CloudFront: the API serves the built SPA and proxies /media from S3.
+  spaDir: env.SPA_DIR || '',
+  trustProxyHops: Number(env.TRUST_PROXY_HOPS || 2),
   seedOnStart: env.SEED_ON_START === 'true',
 };

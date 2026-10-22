@@ -53,13 +53,14 @@ resource "aws_s3_bucket_cors_configuration" "uploads" {
   bucket = aws_s3_bucket.uploads.id
   cors_rule {
     allowed_methods = ["POST"]
-    allowed_origins = ["https://${aws_cloudfront_distribution.main.domain_name}"]
+    allowed_origins = [local.app_origin]
     allowed_headers = ["*"]
     max_age_seconds = 3000
   }
 }
 
 data "aws_iam_policy_document" "frontend_bucket" {
+  count = var.enable_cloudfront ? 1 : 0
   statement {
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.frontend.arn}/*"]
@@ -70,28 +71,32 @@ data "aws_iam_policy_document" "frontend_bucket" {
     condition {
       test     = "StringEquals"
       variable = "AWS:SourceArn"
-      values   = [aws_cloudfront_distribution.main.arn]
+      values   = [aws_cloudfront_distribution.main[0].arn]
     }
   }
 }
 
 resource "aws_s3_bucket_policy" "frontend" {
+  count  = var.enable_cloudfront ? 1 : 0
   bucket = aws_s3_bucket.frontend.id
-  policy = data.aws_iam_policy_document.frontend_bucket.json
+  policy = data.aws_iam_policy_document.frontend_bucket[0].json
 }
 
 data "aws_iam_policy_document" "uploads_bucket" {
-  statement {
-    actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.uploads.arn}/media/*"]
-    principals {
-      type        = "Service"
-      identifiers = ["cloudfront.amazonaws.com"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "AWS:SourceArn"
-      values   = [aws_cloudfront_distribution.main.arn]
+  dynamic "statement" {
+    for_each = var.enable_cloudfront ? [1] : []
+    content {
+      actions   = ["s3:GetObject"]
+      resources = ["${aws_s3_bucket.uploads.arn}/media/*"]
+      principals {
+        type        = "Service"
+        identifiers = ["cloudfront.amazonaws.com"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "AWS:SourceArn"
+        values   = [aws_cloudfront_distribution.main[0].arn]
+      }
     }
   }
   statement {

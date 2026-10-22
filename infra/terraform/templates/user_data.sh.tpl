@@ -18,6 +18,12 @@ get() { aws ssm get-parameter --region "$REGION" --name "$1" --with-decryption -
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$${REPO%%/*}"
 docker pull "$IMAGE"
 
+%{ if serve_spa ~}
+mkdir -p /opt/devmatch/web
+aws s3 sync "s3://${frontend_bucket}" /opt/devmatch/web --delete --region "$REGION"
+chmod -R a+rX /opt/devmatch/web
+%{ endif ~}
+
 umask 077
 cat > /opt/devmatch/app.env <<ENV
 NODE_ENV=production
@@ -32,11 +38,18 @@ AWS_REGION=$REGION
 S3_UPLOADS_BUCKET=${uploads_bucket}
 MEDIA_BASE_URL=/media
 SEED_ON_START=${seed_on_start}
+%{ if serve_spa ~}
+SPA_DIR=/app/web
+TRUST_PROXY_HOPS=1
+%{ endif ~}
 ENV
 
 docker rm -f devmatch-api >/dev/null 2>&1 || true
 exec docker run --name devmatch-api --rm -p 4000:4000 \
   --env-file /opt/devmatch/app.env \
+%{ if serve_spa ~}
+  -v /opt/devmatch/web:/app/web:ro \
+%{ endif ~}
   --log-driver awslogs \
   --log-opt awslogs-region="$REGION" \
   --log-opt awslogs-group="${log_group}" \

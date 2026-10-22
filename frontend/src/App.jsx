@@ -22,7 +22,7 @@ function Nav() {
   return (
     <header className="nav">
       <NavLink to="/" className="brand">
-        <span className="logo">&lt;/&gt;</span> Engineer Match
+        <span className="logo">&lt;/&gt;</span> DevMatch
       </NavLink>
       {user && (
         <nav>
